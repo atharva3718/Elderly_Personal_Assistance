@@ -2,8 +2,9 @@ pipeline {
     agent any
 
     environment {
-        SONARQUBE_ENV = 'SonarQube'            // SonarQube Server name configured in Jenkins
-        NEXUS_REPO = 'nexus.imcc.com/repository/2401166_Elderly_Personal_Assistance'
+        SONARQUBE_ENV = 'SonarQube'            
+        SONAR_HOST_URL = 'http://sonarqube.imcc.com/'
+        NEXUS_REPO = 'http://nexus.imcc.com/repository/2401166_Elderly_Personal_Assistance'
         DOCKER_IMAGE_BACKEND = "${NEXUS_REPO}/backend:latest"
         DOCKER_IMAGE_FRONTEND = "${NEXUS_REPO}/frontend:latest"
     }
@@ -12,7 +13,9 @@ pipeline {
         
         stage('Checkout Code') {
             steps {
-                git credentialsId: 'github-token', url: 'https://github.com/YourRepo/EPA.git'
+                git branch: 'main',
+                    credentialsId: 'github_2401166-token',
+                    url: 'https://github.com/atharva3718/Elderly_Personal_Assistance.git'
             }
         }
 
@@ -23,7 +26,8 @@ pipeline {
                         sonar-scanner \
                         -Dsonar.projectKey=elderly-personal-assistance \
                         -Dsonar.sources=. \
-                        -Dsonar.host.url=$SONAR_HOST_URL
+                        -Dsonar.host.url=${SONAR_HOST_URL} \
+                        -Dsonar.login=${SONAR_AUTH_TOKEN}
                     """
                 }
             }
@@ -31,22 +35,23 @@ pipeline {
 
         stage('Build & Push Backend') {
             steps {
-                script {
-                    sh "docker build -t ${DOCKER_IMAGE_BACKEND} ./backend"
-
-                    withCredentials([usernamePassword(credentialsId: 'nexus-cred', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
-                        sh "echo $NEXUS_PASS | docker login -u $NEXUS_USER --password-stdin nexus.imcc.com"
-                        sh "docker push ${DOCKER_IMAGE_BACKEND}"
-                    }
+                withCredentials([usernamePassword(credentialsId: 'nexus-cred', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
+                    sh """
+                        docker build -t ${DOCKER_IMAGE_BACKEND} ./backend
+                        echo $NEXUS_PASS | docker login -u $NEXUS_USER --password-stdin nexus.imcc.com
+                        docker push ${DOCKER_IMAGE_BACKEND}
+                    """
                 }
             }
         }
 
         stage('Build & Push Frontend') {
             steps {
-                script {
-                    sh "docker build -t ${DOCKER_IMAGE_FRONTEND} ./frontend"
-                    sh "docker push ${DOCKER_IMAGE_FRONTEND}"
+                withCredentials([usernamePassword(credentialsId: 'nexus-cred', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
+                    sh """
+                        docker build -t ${DOCKER_IMAGE_FRONTEND} ./frontend
+                        docker push ${DOCKER_IMAGE_FRONTEND}
+                    """
                 }
             }
         }
