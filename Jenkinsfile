@@ -6,12 +6,10 @@ pipeline {
             kind: Pod
             spec:
               containers:
-              - name: dind
-                image: public.ecr.aws/docker/library/docker:dind
-                securityContext:
-                  privileged: true
+              - name: docker
+                image: public.ecr.aws/docker/library/docker:latest
                 command:
-                - dockerd-entrypoint.sh
+                - cat
                 tty: true
             """
         }
@@ -48,7 +46,7 @@ pipeline {
 
         stage('Build & Push Backend') {
             steps {
-                container('dind') {
+                container('docker') {
                     script {
                         sh "docker build -t ${DOCKER_IMAGE_BACKEND} ./backend"
                         withCredentials([usernamePassword(credentialsId: 'nexus-cred', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
@@ -62,7 +60,7 @@ pipeline {
 
         stage('Build & Push Frontend') {
             steps {
-                container('dind') {
+                container('docker') {
                     script {
                         sh "docker build -t ${DOCKER_IMAGE_FRONTEND} ./frontend"
                         withCredentials([usernamePassword(credentialsId: 'nexus-cred', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
@@ -77,14 +75,14 @@ pipeline {
     post {
         always {
             script {
-                try {
-                    container('dind') {
+                if (env.NODE_NAME) {
+                    container('docker') {
                         sh "docker rmi ${DOCKER_IMAGE_BACKEND} || true"
                         sh "docker rmi ${DOCKER_IMAGE_FRONTEND} || true"
                         sh "docker logout nexus.imcc.com || true"
                     }
-                } catch (Exception e) {
-                    echo "Cleanup failed (likely due to agent failure): ${e.message}"
+                } else {
+                    echo "No node available — skipping docker cleanup"
                 }
             }
         }
