@@ -7,16 +7,18 @@ pipeline {
             spec:
               containers:
               - name: docker
-                image: public.ecr.aws/docker/library/docker:latest
+                image: public.ecr.aws/docker/library/docker:dind
+                securityContext:
+                  privileged: true
                 command:
-                - cat
+                - dockerd-entrypoint.sh
                 tty: true
             """
         }
     }
 
     environment {
-        SONARQUBE_ENV = 'sonar-server'
+        SONARQUBE_ENV = 'sonarqube'
         NEXUS_REPO = 'nexus.imcc.com/repository/2401166_Elderly_Personal_Assistance'
         DOCKER_IMAGE_BACKEND = "${NEXUS_REPO}/backend:latest"
         DOCKER_IMAGE_FRONTEND = "${NEXUS_REPO}/frontend:latest"
