@@ -13,6 +13,12 @@ pipeline {
                 command:
                 - dockerd-entrypoint.sh
                 tty: true
+
+              - name: sonar
+                image: sonarsource/sonar-scanner-cli:latest
+                command:
+                - cat
+                tty: true
             """
         }
     }
@@ -35,13 +41,17 @@ pipeline {
 
         stage('SonarQube Analysis') {
             steps {
-                withSonarQubeEnv("${SONARQUBE_ENV}") {
-                    sh """
-                        sonar-scanner \
-                        -Dsonar.projectKey=elderly-personal-assistance \
-                        -Dsonar.sources=. \
-                        -Dsonar.host.url=http://sonarqube.sonarqube.svc.cluster.local:9000
-                    """
+                container('sonar') {
+                    withSonarQubeEnv("${SONARQUBE_ENV}") {
+                        sh """
+                            sonar-scanner \
+                            -Dsonar.projectKey=elderly-personal-assistance \
+                            -Dsonar.sources=. \
+                            -Dsonar.java.binaries=target/ \
+                            -Dsonar.host.url=http://sonarqube.sonarqube.svc.cluster.local:9000 \
+                            -Dsonar.login=$SONARQUBE_ENV
+                        """
+                    }
                 }
             }
         }
@@ -77,14 +87,10 @@ pipeline {
     post {
         always {
             script {
-                if (env.NODE_NAME) {
-                    container('docker') {
-                        sh "docker rmi ${DOCKER_IMAGE_BACKEND} || true"
-                        sh "docker rmi ${DOCKER_IMAGE_FRONTEND} || true"
-                        sh "docker logout nexus.imcc.com || true"
-                    }
-                } else {
-                    echo "No node available — skipping docker cleanup"
+                container('docker') {
+                    sh "docker rmi ${DOCKER_IMAGE_BACKEND} || true"
+                    sh "docker rmi ${DOCKER_IMAGE_FRONTEND} || true"
+                    sh "docker logout nexus.imcc.com || true"
                 }
             }
         }
