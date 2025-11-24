@@ -2,30 +2,28 @@ pipeline {
     agent any
 
     environment {
-        // Credentials provided by user
-        // WARNING: In a production environment, use Jenkins Credentials Binding instead of plain text!
-        SONAR_HOST_URL = 'http://sonarqube.imcc.com/'
-        SONAR_LOGIN = 'student'
-        SONAR_PASSWORD = 'Imccstudent@2025'
-        
-        NEXUS_URL = 'nexus.imcc.com'
-        NEXUS_USER = 'student'
-        NEXUS_PASS = 'Imcc@2025'
+        SONARQUBE_ENV = 'SonarQube'            // SonarQube Server name configured in Jenkins
+        NEXUS_REPO = 'nexus.imcc.com/repository/2401166_Elderly_Personal_Assistance'
+        DOCKER_IMAGE_BACKEND = "${NEXUS_REPO}/backend:latest"
+        DOCKER_IMAGE_FRONTEND = "${NEXUS_REPO}/frontend:latest"
     }
 
     stages {
+        
+        stage('Checkout Code') {
+            steps {
+                git credentialsId: 'github-token', url: 'https://github.com/YourRepo/EPA.git'
+            }
+        }
+
         stage('SonarQube Analysis') {
             steps {
-                script {
-                    // Assuming sonar-scanner is available in the path
-                    // If using SonarQube plugin, you can wrap this in withSonarQubeEnv('SonarQube')
+                withSonarQubeEnv("${SONARQUBE_ENV}") {
                     sh """
                         sonar-scanner \
                         -Dsonar.projectKey=elderly-personal-assistance \
                         -Dsonar.sources=. \
-                        -Dsonar.host.url=${SONAR_HOST_URL} \
-                        -Dsonar.login=${SONAR_LOGIN} \
-                        -Dsonar.password=${SONAR_PASSWORD}
+                        -Dsonar.host.url=$SONAR_HOST_URL
                     """
                 }
             }
@@ -34,14 +32,12 @@ pipeline {
         stage('Build & Push Backend') {
             steps {
                 script {
-                    echo 'Building Backend Docker Image...'
-                    sh "docker build -t ${NEXUS_URL}/backend:latest ./backend"
-                    
-                    echo 'Logging into Nexus...'
-                    sh "echo ${NEXUS_PASS} | docker login -u ${NEXUS_USER} --password-stdin http://${NEXUS_URL}"
-                    
-                    echo 'Pushing Backend Image to Nexus...'
-                    sh "docker push ${NEXUS_URL}/backend:latest"
+                    sh "docker build -t ${DOCKER_IMAGE_BACKEND} ./backend"
+
+                    withCredentials([usernamePassword(credentialsId: 'nexus-cred', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
+                        sh "echo $NEXUS_PASS | docker login -u $NEXUS_USER --password-stdin nexus.imcc.com"
+                        sh "docker push ${DOCKER_IMAGE_BACKEND}"
+                    }
                 }
             }
         }
@@ -49,12 +45,8 @@ pipeline {
         stage('Build & Push Frontend') {
             steps {
                 script {
-                    echo 'Building Frontend Docker Image...'
-                    sh "docker build -t ${NEXUS_URL}/frontend:latest ./frontend"
-                    
-                    // Already logged in from previous stage
-                    echo 'Pushing Frontend Image to Nexus...'
-                    sh "docker push ${NEXUS_URL}/frontend:latest"
+                    sh "docker build -t ${DOCKER_IMAGE_FRONTEND} ./frontend"
+                    sh "docker push ${DOCKER_IMAGE_FRONTEND}"
                 }
             }
         }
@@ -62,10 +54,9 @@ pipeline {
 
     post {
         always {
-            // Clean up docker images to save space
-            sh "docker rmi ${NEXUS_URL}/backend:latest || true"
-            sh "docker rmi ${NEXUS_URL}/frontend:latest || true"
-            sh "docker logout http://${NEXUS_URL} || true"
+            sh "docker rmi ${DOCKER_IMAGE_BACKEND} || true"
+            sh "docker rmi ${DOCKER_IMAGE_FRONTEND} || true"
+            sh "docker logout nexus.imcc.com || true"
         }
     }
 }
