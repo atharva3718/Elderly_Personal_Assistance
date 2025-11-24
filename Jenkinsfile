@@ -1,9 +1,24 @@
 pipeline {
-    agent any
+    agent {
+        kubernetes {
+            yaml """
+            apiVersion: v1
+            kind: Pod
+            spec:
+              containers:
+              - name: dind
+                image: public.ecr.aws/docker/library/docker:dind
+                securityContext:
+                  privileged: true
+                command:
+                - dockerd-entrypoint.sh
+                tty: true
+            """
+        }
+    }
 
     environment {
-        SONARQUBE_ENV = 'sonarqube' // must match name in configuration
-        SONAR_HOST_URL = 'http://sonarqube.imcc.com/'
+        SONARQUBE_ENV = 'sonar-server'
         NEXUS_REPO = 'nexus.imcc.com/repository/2401166_Elderly_Personal_Assistance'
         DOCKER_IMAGE_BACKEND = "${NEXUS_REPO}/backend:latest"
         DOCKER_IMAGE_FRONTEND = "${NEXUS_REPO}/frontend:latest"
@@ -25,7 +40,7 @@ pipeline {
                         sonar-scanner \
                         -Dsonar.projectKey=elderly-personal-assistance \
                         -Dsonar.sources=. \
-                        -Dsonar.host.url=$SONAR_HOST_URL
+                        -Dsonar.host.url=http://sonarqube.sonarqube.svc.cluster.local:9000
                     """
                 }
             }
@@ -33,11 +48,13 @@ pipeline {
 
         stage('Build & Push Backend') {
             steps {
-                script {
-                    sh "docker build -t ${DOCKER_IMAGE_BACKEND} ./backend"
-                    withCredentials([usernamePassword(credentialsId: 'nexus-cred', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
-                        sh "echo $NEXUS_PASS | docker login -u $NEXUS_USER --password-stdin nexus.imcc.com"
-                        sh "docker push ${DOCKER_IMAGE_BACKEND}"
+                container('dind') {
+                    script {
+                        sh "docker build -t ${DOCKER_IMAGE_BACKEND} ./backend"
+                        withCredentials([usernamePassword(credentialsId: 'nexus-cred', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
+                            sh "echo $NEXUS_PASS | docker login -u $NEXUS_USER --password-stdin nexus.imcc.com"
+                            sh "docker push ${DOCKER_IMAGE_BACKEND}"
+                        }
                     }
                 }
             }
@@ -45,10 +62,12 @@ pipeline {
 
         stage('Build & Push Frontend') {
             steps {
-                script {
-                    sh "docker build -t ${DOCKER_IMAGE_FRONTEND} ./frontend"
-                    withCredentials([usernamePassword(credentialsId: 'nexus-cred', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
-                        sh "docker push ${DOCKER_IMAGE_FRONTEND}"
+                container('dind') {
+                    script {
+                        sh "docker build -t ${DOCKER_IMAGE_FRONTEND} ./frontend"
+                        withCredentials([usernamePassword(credentialsId: 'nexus-cred', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
+                            sh "docker push ${DOCKER_IMAGE_FRONTEND}"
+                        }
                     }
                 }
             }
@@ -57,9 +76,17 @@ pipeline {
 
     post {
         always {
-            sh "docker rmi ${DOCKER_IMAGE_BACKEND} || true"
-            sh "docker rmi ${DOCKER_IMAGE_FRONTEND} || true"
-            sh "docker logout nexus.imcc.com || true"
+            script {
+                try {
+                    container('dind') {
+                        sh "docker rmi ${DOCKER_IMAGE_BACKEND} || true"
+                        sh "docker rmi ${DOCKER_IMAGE_FRONTEND} || true"
+                        sh "docker logout nexus.imcc.com || true"
+                    }
+                } catch (Exception e) {
+                    echo "Cleanup failed (likely due to agent failure): ${e.message}"
+                }
+            }
         }
     }
 }
